@@ -1,4 +1,5 @@
 import { scrapeUrl, scrapeUrls } from "./hyperbrowser";
+import { validateUrls } from "./url-validator";
 import { ScrapedContent } from "@/types";
 
 // Maximum number of pages to crawl per initial URL
@@ -246,9 +247,18 @@ export async function recursiveCrawl(
   
   const initialBatch = initialUrls.slice(0, Math.min(initialUrls.length, 5));
   const phase1Start = Date.now();
-  
-  // Scrape all initial URLs in parallel
-  const initialResults = await scrapeUrls(initialBatch);
+
+  // Validate URLs before scraping
+  console.log(`[Crawler] Validating ${initialBatch.length} URLs`);
+  const validationResults = await validateUrls(initialBatch);
+  const validatedBatch = validationResults
+    .filter(r => r.valid)
+    .map(r => r.finalUrl || r.url);
+
+  console.log(`[Crawler] ${validatedBatch.length}/${initialBatch.length} valid`);
+
+  // Scrape all validated URLs in parallel
+  const initialResults = await scrapeUrls(validatedBatch);
   
   console.log(`[Crawler] Phase 1 parallel scrape: ${((Date.now() - phase1Start) / 1000).toFixed(1)}s`);
   
@@ -302,22 +312,32 @@ export async function recursiveCrawl(
   const additionalUrls = Array.from(allUrls).filter(url => !crawledUrls.has(url));
   
   if (additionalUrls.length > 0) {
-    console.log(`[Crawler] Phase 2: Scraping ${additionalUrls.length} additional URLs`);
-    console.log(`[Crawler] URLs:`, additionalUrls);
-    
-    try {
-      const additionalContent = await scrapeUrls(additionalUrls);
-      
-      for (const content of additionalContent) {
-        if (content.isPaywalled) {
-          paywalledUrls.push(content.url);
-        } else if (content.success && content.markdown.length > 100) {
-          console.log(`[Crawler] Added: ${content.url} (${content.markdown.length} chars)`);
-          results.push(content);
+    console.log(`[Crawler] Phase 2: Validating ${additionalUrls.length} URLs`);
+
+    const phase2Validation = await validateUrls(additionalUrls);
+    const validatedPhase2 = phase2Validation
+      .filter(r => r.valid)
+      .map(r => r.finalUrl || r.url);
+
+    console.log(`[Crawler] Phase 2: ${validatedPhase2.length}/${additionalUrls.length} valid`);
+
+    if (validatedPhase2.length > 0) {
+      console.log(`[Crawler] Phase 2: Scraping ${validatedPhase2.length} validated URLs`);
+
+      try {
+        const additionalContent = await scrapeUrls(validatedPhase2);
+
+        for (const content of additionalContent) {
+          if (content.isPaywalled) {
+            paywalledUrls.push(content.url);
+          } else if (content.success && content.markdown.length > 100) {
+            console.log(`[Crawler] Added: ${content.url} (${content.markdown.length} chars)`);
+            results.push(content);
+          }
         }
+      } catch (error) {
+        console.warn(`[Crawler] Phase 2 error, continuing with ${results.length} pages`);
       }
-    } catch (error) {
-      console.warn(`[Crawler] Phase 2 error, continuing with ${results.length} pages`);
     }
   }
   

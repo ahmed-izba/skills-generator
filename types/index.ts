@@ -3,6 +3,23 @@ export interface GenerateRequest {
   url?: string;
 }
 
+export interface ValidationResult {
+  url: string;
+  valid: boolean;
+  status: number;
+  finalUrl?: string;
+  error?: string;
+  checkedAt: number;
+}
+
+export interface ValidationMetadata {
+  totalChecked: number;
+  validUrls: number;
+  brokenUrls: number;
+  redirectedUrls: number;
+  timeoutUrls: number;
+}
+
 export interface GenerateResponse {
   content: string;
   sources: string[];
@@ -12,6 +29,7 @@ export interface GenerateResponse {
     generatedAt: string;
     topicType?: string;
     warnings?: string[];
+    validation?: ValidationMetadata;
   };
   error?: string;
 }

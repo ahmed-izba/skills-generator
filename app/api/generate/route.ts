@@ -5,7 +5,8 @@ import { recursiveCrawl } from "@/lib/crawler";
 import { classifyTopic } from "@/lib/classifier";
 import { generateSkill } from "@/lib/anthropic";
 import { getCachedContent, cacheContent } from "@/lib/cache";
-import { GenerateRequest, ScrapedContent } from "@/types";
+import { validateUrls } from "@/lib/url-validator";
+import { GenerateRequest, ScrapedContent, ValidationMetadata } from "@/types";
 
 // Maximum sources to use for generation (top quality ones)
 const MAX_SOURCES = 10;
@@ -138,6 +139,7 @@ export async function POST(request: NextRequest) {
         let urls: string[] = [];
         let scrapedContent: ScrapedContent[] = [];
         let usedCache = false;
+        let validationMetadata: ValidationMetadata | undefined;
 
         // OPTIMIZATION: Run cache check and web search in PARALLEL
         sendProgress("searching", "Checking cache & searching...", 5);
@@ -180,9 +182,41 @@ export async function POST(request: NextRequest) {
             return;
           }
 
-          sendProgress("crawling", `Crawling ${urls.length} sources...`, 15);
+          // Pre-crawl validation
+          sendProgress("validating", `Checking ${urls.length} URLs...`, 12);
+          const validationResults = await validateUrls(urls);
+          const validUrls = validationResults
+            .filter(r => r.valid)
+            .map(r => r.finalUrl || r.url);
+          const brokenUrls = validationResults.filter(r => !r.valid);
+          const redirectedUrls = validationResults.filter(r => r.finalUrl && r.finalUrl !== r.url);
+          const timeoutUrls = validationResults.filter(r => r.error?.includes('aborted') || r.error?.includes('timeout'));
+
+          console.log(`[Validator] ${validUrls.length} valid, ${brokenUrls.length} broken`);
+
+          if (brokenUrls.length > 0) {
+            console.log(`[Validator] Broken:`, brokenUrls.map(b => `${b.url} (${b.status || 'FAIL'})`));
+          }
+
+          // Store validation metadata
+          validationMetadata = {
+            totalChecked: validationResults.length,
+            validUrls: validUrls.length,
+            brokenUrls: brokenUrls.length,
+            redirectedUrls: redirectedUrls.length,
+            timeoutUrls: timeoutUrls.length,
+          };
+
+          urls = validUrls;
+
+          if (urls.length === 0) {
+            sendError("All URLs failed validation");
+            return;
+          }
+
+          sendProgress("crawling", `Crawling ${validUrls.length} validated sources...`, 15);
           console.log(`[API] Starting recursive crawl from ${urls.length} URLs`);
-          
+
           scrapedContent = await recursiveCrawl(urls, searchTopic);
           
           const successfulScrapes = scrapedContent.filter(c => c.success && !c.isPaywalled);
@@ -264,7 +298,14 @@ export async function POST(request: NextRequest) {
           usedCache,
           paywalledCount: paywalledUrls.length,
           totalChars: selectedChars,
+          validation: validationMetadata,
           warnings: [
+            ...(validationMetadata && validationMetadata.brokenUrls > 0
+              ? [`${validationMetadata.brokenUrls} broken URLs excluded (404/500/timeout)`]
+              : []),
+            ...(validationMetadata && validationMetadata.redirectedUrls > 0
+              ? [`${validationMetadata.redirectedUrls} URLs redirected to different locations`]
+              : []),
             ...(paywalledUrls.length > 0
               ? [`${paywalledUrls.length} source(s) paywalled/blocked${fallbackUsed ? ' (fallback used)' : ''}`]
               : []),

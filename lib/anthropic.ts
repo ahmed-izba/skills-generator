@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ScrapedContent, TopicClassification } from "@/types";
 import { getTemplateForType } from "./classifier";
 import { getAnthropicClient } from "./anthropic-client";
+import { validateUrls } from "./url-validator";
 
 // =============================================================================
 // MODEL CONFIGURATION - Hybrid Sonnet/Opus approach
@@ -400,6 +401,15 @@ Output the full SKILL.md (no code fences):`;
   return content;
 }
 
+// Helper function to extract URLs from Sources section
+function extractSourceUrls(content: string): string[] {
+  const sourceSection = content.match(/## Sources\n\n([\s\S]*?)(\n##|$)/);
+  if (!sourceSection) return [];
+
+  const urlRegex = /https?:\/\/[^\s\)]+/g;
+  return [...new Set(sourceSection[1].match(urlRegex) || [])];
+}
+
 // =============================================================================
 // PASS 4: VALIDATION (Local analysis + optional Sonnet fix)
 // =============================================================================
@@ -420,6 +430,19 @@ async function pass4Validate(
   if (!analysis.hasSources) criticalMissing.push('Sources');
   if (!analysis.hasGuardrails) criticalMissing.push('Guardrails');
   if (!analysis.hasTroubleshooting) criticalMissing.push('Troubleshooting');
+
+  // Validate URLs in final output
+  const sourceUrls = extractSourceUrls(currentContent);
+  if (sourceUrls.length > 0) {
+    console.log(`[Pass 4] Validating ${sourceUrls.length} final source URLs`);
+    const sourceValidation = await validateUrls(sourceUrls);
+    const brokenSources = sourceValidation.filter(r => !r.valid);
+
+    if (brokenSources.length > 0) {
+      warnings.push(`${brokenSources.length} broken URLs in final sources section`);
+      console.log(`[Pass 4] Broken sources:`, brokenSources.map(b => b.url));
+    }
+  }
 
   // Quality warnings (non-blocking)
   if (!analysis.hasSmallExamples) warnings.push('Examples may be too large - prefer 10-20 line snippets');
