@@ -63,8 +63,18 @@ export async function POST(request: NextRequest) {
         try {
           const data = JSON.stringify({ phase, message, progress });
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-        } catch {
-          // Controller already closed, ignore
+        } catch (error) {
+          // Expected: Controller already closed
+          if (error instanceof TypeError && error.message.includes('closed')) {
+            return;
+          }
+
+          // Unexpected error - log with context
+          console.error(`[SSE] Failed to send progress update:`, error);
+          console.error(`[SSE] Phase: ${phase}, Message: ${message}, Progress: ${progress}`);
+
+          // Mark controller as closed to prevent further attempts
+          isClosed = true;
         }
       };
 
@@ -75,8 +85,18 @@ export async function POST(request: NextRequest) {
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
           isClosed = true;
           controller.close();
-        } catch {
-          // Controller already closed, ignore
+        } catch (err) {
+          // Expected: Controller already closed
+          if (err instanceof TypeError && err.message.includes('closed')) {
+            return;
+          }
+
+          // Unexpected error - log with context
+          console.error(`[SSE] Failed to send error:`, err);
+          console.error(`[SSE] Error message being sent: ${error}`);
+
+          // Ensure closed flag is set
+          isClosed = true;
         }
       };
 
@@ -300,6 +320,12 @@ export async function POST(request: NextRequest) {
         // Check if any sources used the fallback strategy
         const fallbackUsed = selectedSources.some(s => (s as any).fallbackUsed);
 
+        // Extract crawler warnings from results (Phase 2 failures, etc.)
+        const crawlerWarnings: string[] = [];
+        if (scrapedContent.length > 0 && (scrapedContent[0] as any)._warnings) {
+          crawlerWarnings.push(...(scrapedContent[0] as any)._warnings);
+        }
+
         const metadata = {
           topic: searchTopic,
           scrapedCount: selectedSources.length,
@@ -313,7 +339,10 @@ export async function POST(request: NextRequest) {
           validation: validationMetadata,
           warnings: [
             ...(validationMetadata && validationMetadata.brokenUrls > 0
-              ? [`${validationMetadata.brokenUrls} broken URLs excluded (404/500/timeout)`]
+              ? [`${validationMetadata.brokenUrls} broken URLs excluded (404/403/500)`]
+              : []),
+            ...(validationMetadata && validationMetadata.timeoutUrls > 0
+              ? [`${validationMetadata.timeoutUrls} URLs timed out (network too slow or unreachable)`]
               : []),
             ...(validationMetadata && validationMetadata.redirectedUrls > 0
               ? [`${validationMetadata.redirectedUrls} URLs redirected to different locations`]
@@ -324,6 +353,7 @@ export async function POST(request: NextRequest) {
             ...(fallbackUsed
               ? ['Some sources flagged as paywalled but used due to substantial content (>1000 chars)']
               : []),
+            ...crawlerWarnings,
             ...warnings,
           ],
           generatedAt: new Date().toISOString(),

@@ -355,8 +355,17 @@ export async function recursiveCrawl(
           console.error(`[Crawler] Error message: ${error.message}`);
           console.error(`[Crawler] Stack trace:`, error.stack);
         }
-        // TODO: Consider adding to metadata.warnings so users are informed
-        // Also consider whether to continue or fail - current behavior masks the problem
+
+        // Surface failure to users via warnings
+        if (results.length > 0) {
+          const warnings = (results[0] as any)._warnings || [];
+          warnings.push(
+            `Failed to crawl ${validatedPhase2.length} additional pages due to scraping error. ` +
+            `Using ${results.length} pages from initial crawl only.`
+          );
+          (results[0] as any)._warnings = warnings;
+        }
+
         console.warn(`[Crawler] Continuing with ${results.length} pages from Phase 1`);
       }
     }

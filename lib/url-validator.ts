@@ -172,9 +172,18 @@ export async function validateUrl(
             const base = new URL(url);
             redirectUrl = new URL(location, base.origin).href;
           } catch (error) {
-            console.warn(`[Validator] Failed to parse redirect URL: ${location} from ${url}`, error);
-            redirectUrl = location;
-            // Consider: Should we mark this as invalid instead of proceeding?
+            console.error(`[Validator] Failed to parse redirect URL: ${location} from ${url}`, error);
+
+            // Mark URL as invalid - broken redirect = broken URL
+            const result: ValidationResult = {
+              url,
+              valid: false,
+              status: response.status,
+              error: `Redirect has invalid Location header: ${location}`,
+              checkedAt: Date.now(),
+            };
+            setCache(url, result);
+            return result;
           }
         }
 
