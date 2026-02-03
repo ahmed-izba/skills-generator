@@ -210,14 +210,26 @@ export async function POST(request: NextRequest) {
           urls = validUrls;
 
           if (urls.length === 0) {
-            sendError("All URLs failed validation");
+            // Provide detailed error information
+            const errorSummary = brokenUrls
+              .slice(0, 3) // Show first 3 to avoid overwhelming
+              .map(b => `${b.url} (${b.status || 'TIMEOUT'}: ${b.error})`)
+              .join(', ');
+
+            const additionalCount = brokenUrls.length > 3 ? ` and ${brokenUrls.length - 3} more` : '';
+
+            sendError(
+              `All ${validationResults.length} URLs failed validation. ` +
+              `Errors: ${errorSummary}${additionalCount}. ` +
+              `Please check if the URLs are accessible or try different search terms.`
+            );
             return;
           }
 
           sendProgress("crawling", `Crawling ${validUrls.length} validated sources...`, 15);
           console.log(`[API] Starting recursive crawl from ${urls.length} URLs`);
 
-          scrapedContent = await recursiveCrawl(urls, searchTopic);
+          scrapedContent = await recursiveCrawl(urls, searchTopic, true); // Skip Phase 1 validation since we just validated
           
           const successfulScrapes = scrapedContent.filter(c => c.success && !c.isPaywalled);
           const totalChars = successfulScrapes.reduce((sum, c) => sum + c.markdown.length, 0);

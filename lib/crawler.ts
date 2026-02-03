@@ -91,8 +91,9 @@ function extractLinks(markdown: string, baseUrl: string): string[] {
       try {
         const base = new URL(baseUrl);
         url = `${base.origin}${url}`;
-      } catch {
-        continue;
+      } catch (error) {
+        console.warn(`[Crawler] Failed to parse relative URL: ${url} with base ${baseUrl}`, error);
+        continue; // Skip this URL
       }
     }
     
@@ -113,8 +114,9 @@ function extractLinks(markdown: string, baseUrl: string): string[] {
       try {
         const base = new URL(baseUrl);
         url = `${base.origin}${url}`;
-      } catch {
-        continue;
+      } catch (error) {
+        console.warn(`[Crawler] Failed to parse relative URL: ${url} with base ${baseUrl}`, error);
+        continue; // Skip this URL
       }
     }
     
@@ -224,16 +226,18 @@ function generateCommonDocPaths(baseUrl: string): string[] {
   try {
     const urlObj = new URL(baseUrl);
     const origin = urlObj.origin;
-    
+
     return commonPaths.map(path => `${origin}${path}`);
-  } catch {
+  } catch (error) {
+    console.warn(`[Crawler] Failed to parse base URL for common paths: ${baseUrl}`, error);
     return [];
   }
 }
 
 export async function recursiveCrawl(
   initialUrls: string[],
-  topic: string
+  topic: string,
+  skipValidation = false  // Skip Phase 1 validation if URLs are pre-validated
 ): Promise<ScrapedContent[]> {
   const allUrls = new Set<string>(initialUrls);
   const crawledUrls = new Set<string>();
@@ -248,14 +252,21 @@ export async function recursiveCrawl(
   const initialBatch = initialUrls.slice(0, Math.min(initialUrls.length, 5));
   const phase1Start = Date.now();
 
-  // Validate URLs before scraping
-  console.log(`[Crawler] Validating ${initialBatch.length} URLs`);
-  const validationResults = await validateUrls(initialBatch);
-  const validatedBatch = validationResults
-    .filter(r => r.valid)
-    .map(r => r.finalUrl || r.url);
+  let validatedBatch: string[];
 
-  console.log(`[Crawler] ${validatedBatch.length}/${initialBatch.length} valid`);
+  if (!skipValidation) {
+    // Validate URLs before scraping
+    console.log(`[Crawler] Validating ${initialBatch.length} URLs`);
+    const validationResults = await validateUrls(initialBatch);
+    validatedBatch = validationResults
+      .filter(r => r.valid)
+      .map(r => r.finalUrl || r.url);
+
+    console.log(`[Crawler] ${validatedBatch.length}/${initialBatch.length} valid`);
+  } else {
+    console.log(`[Crawler] Skipping Phase 1 validation (pre-validated)`);
+    validatedBatch = initialBatch;
+  }
 
   // Scrape all validated URLs in parallel
   const initialResults = await scrapeUrls(validatedBatch);
@@ -336,7 +347,17 @@ export async function recursiveCrawl(
           }
         }
       } catch (error) {
-        console.warn(`[Crawler] Phase 2 error, continuing with ${results.length} pages`);
+        // Comprehensive error logging for debugging
+        console.error(`[Crawler] Phase 2 scraping failed:`, error);
+        console.error(`[Crawler] Attempted to scrape ${validatedPhase2.length} URLs`);
+        console.error(`[Crawler] Error type: ${error?.constructor?.name}`);
+        if (error instanceof Error) {
+          console.error(`[Crawler] Error message: ${error.message}`);
+          console.error(`[Crawler] Stack trace:`, error.stack);
+        }
+        // TODO: Consider adding to metadata.warnings so users are informed
+        // Also consider whether to continue or fail - current behavior masks the problem
+        console.warn(`[Crawler] Continuing with ${results.length} pages from Phase 1`);
       }
     }
   }

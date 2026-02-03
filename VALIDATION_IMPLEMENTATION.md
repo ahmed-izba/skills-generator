@@ -42,7 +42,7 @@ Updated `GenerateResponse` metadata to include optional `validation` field.
 
 **File:** `app/api/generate/route.ts`
 
-**Location:** After search results (line 181)
+**Location:** In `POST` handler, after search results retrieval, before `recursiveCrawl()` call
 
 **Implementation:**
 - Validates all search result URLs before crawling
@@ -65,8 +65,8 @@ Updated `GenerateResponse` metadata to include optional `validation` field.
 **File:** `lib/crawler.ts`
 
 **Locations:**
-1. **Phase 1** (line 251): Validates initial batch before scraping
-2. **Phase 2** (line 309): Validates discovered links before scraping
+1. **Phase 1**: In `recursiveCrawl()`, validates initial batch before scraping
+2. **Phase 2**: In `recursiveCrawl()`, Phase 2 discovered links section, validates before scraping
 
 **Implementation:**
 - Validates URLs before making HyperBrowser API calls
@@ -87,7 +87,7 @@ Updated `GenerateResponse` metadata to include optional `validation` field.
 
 **File:** `lib/anthropic.ts`
 
-**Location:** Pass 4 validation (line 419)
+**Location:** In `generateSkill()`, Pass 4 validation section, after structural checks
 
 **Implementation:**
 - Extracts URLs from final SKILL.md Sources section
